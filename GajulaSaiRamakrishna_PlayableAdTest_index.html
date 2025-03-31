@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=360, height=640, user-scalable=no">
+    <title>Color Sorting Playable Ad</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.55.2/phaser.min.js"></script>
+    <style>
+        body { margin: 0; background: black; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script>
+        const config = {
+            type: Phaser.AUTO,
+            width: 360,
+            height: 640,
+            backgroundColor: '#000',
+            scene: { preload, create }
+        };
+
+        let game = new Phaser.Game(config);
+        let tubes = [];
+        let ballStacks = new Map(); 
+        let topTube, gameScene, instructionText;
+        let autoPlayActive = true;
+
+        function preload() {
+            this.load.image('bg', 'bg.png');
+            this.load.image('tube', 'tube.png');
+            this.load.image('red_ball', 'red_body_circle.png'); 
+            this.load.image('purple_ball', 'purple_circle.png');
+            this.load.image('yellow_ball', 'yellow_circle.png');
+            this.load.image('hand', 'hand.png');
+            this.load.image('playnow', 'playnow.png');
+            this.load.image('close', 'close.png');
+            this.load.audio('bg_music', 'background_music.mp3');
+
+        }
+
+        function create() {
+            gameScene = this;
+            this.add.image(180, 320, 'bg');
+
+            instructionText = this.add.text(180, 50, 'Sort all Colors', {
+                font: '24px Arial',
+                fill: '#ffffff'
+            }).setOrigin(0.5);
+
+            let tubePositions = [80, 180, 280]; 
+
+            topTube = this.add.image(180, 250, 'tube').setScale(0.4);
+            ballStacks.set(topTube, []);
+
+            tubePositions.forEach(x => {
+                let tube = this.add.image(x, 500, 'tube').setScale(0.4);
+                tubes.push(tube);
+                ballStacks.set(tube, []);
+            });
+
+            spawnBalls();
+            startAutoPlay();
+
+            bgMusic = this.sound.add('bg_music', { loop: true });
+            this.input.once('pointerdown', () => {
+                bgMusic.play();
+            });
+
+            gameTimer = this.time.delayedCall(300000, stopGame, [], this);
+
+
+            this.input.on('drag', (pointer, ball, dragX, dragY) => {
+                if (!autoPlayActive) {
+                    ball.x = dragX;
+                    ball.y = dragY;
+                }
+            });
+
+            this.input.on('dragend', (pointer, ball) => {
+                if (!autoPlayActive) {
+                    let targetTube = findTubeAtPosition(ball.x, ball.y);
+                    if (targetTube && ball.currentTube !== targetTube) {
+                        placeBallInTube(ball, targetTube);
+                        checkWinCondition();
+                    } else {
+                        resetBallPosition(ball);
+                    }
+                }
+            });
+        }
+
+        function spawnBalls() {
+            let colors = ['red_ball', 'yellow_ball', 'purple_ball'];
+
+            tubes.forEach(tube => {
+                let shuffledColors = shuffleArray([...colors]); 
+                let stack = ballStacks.get(tube);
+
+                for (let j = 0; j < 3; j++) {
+                    let ballY = tube.y + 60 - (j * 65);
+                    let ball = gameScene.add.image(tube.x, ballY, shuffledColors[j]).setScale(0.6);
+
+                    ball.originalX = ball.x;
+                    ball.originalY = ball.y;
+                    ball.currentTube = tube;
+                    stack.push(ball);
+
+                    if (j === 2) {
+                        ball.setInteractive();
+                        gameScene.input.setDraggable(ball);
+                    }
+                }
+            });
+        }
+
+        function startAutoPlay() {
+            let autoMoveCount = 0;
+            let autoPlayInterval = setInterval(() => {
+                if (autoMoveCount >= 5) {
+                    clearInterval(autoPlayInterval);
+                    autoPlayActive = false;
+                    instructionText.setText('Your Turn!!!');
+                    showHandAnimation();
+                    return;
+                }
+
+                let moveMade = false;
+                let allBalls = [];
+
+                ballStacks.forEach(stack => {
+                    if (stack.length > 0) {
+                        allBalls.push(stack[stack.length - 1]);
+                    }
+                });
+
+                while (!moveMade && allBalls.length > 0) {
+                    let ball = Phaser.Utils.Array.RemoveRandomElement(allBalls);
+                    let currentTube = ball.currentTube;
+                    let targetTube = Phaser.Utils.Array.GetRandom(tubes.concat(topTube).filter(t => t !== currentTube && ballStacks.get(t).length < 3));
+
+                    if (targetTube) {
+                        placeBallInTube(ball, targetTube);
+                        moveMade = true;
+                        autoMoveCount++;
+                    }
+                }
+
+            }, 1000);
+        }
+
+        function showHandAnimation() {
+            instructionText.setText("Hold and Drag to Sort");
+
+            let hand = gameScene.add.image(100, 450, 'hand').setScale(0.2);
+            gameScene.tweens.add({
+                targets: hand,
+                x: 250,
+                y: 400,
+                duration: 800,  
+                yoyo: true,
+                repeat: 1,
+                onComplete: () => {
+                    hand.destroy();
+                    instructionText.setText("Your Turn!!!");
+                }
+            });
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                let j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function findTubeAtPosition(x, y) {
+            let allTubes = [topTube, ...tubes];
+            return allTubes.find(tube => Math.abs(tube.x - x) < 30 && Math.abs((tube.y - 100) - y) < 80) || null;
+        }
+
+        function placeBallInTube(ball, tube) {
+            let stack = ballStacks.get(tube);
+            let oldStack = ballStacks.get(ball.currentTube);
+
+            if (stack.length < 3) {
+                stack.push(ball);
+                ball.currentTube = tube;
+                if (oldStack) {
+                    let index = oldStack.indexOf(ball);
+                    if (index !== -1) oldStack.splice(index, 1);
+                }
+                repositionBalls(tube);
+                repositionBalls(ball.currentTube);
+                updateTopBalls(oldStack);
+                updateTopBalls(stack);
+            } else {
+                resetBallPosition(ball);
+            }
+        }
+
+        function resetBallPosition(ball) {
+            gameScene.tweens.add({
+                targets: ball,
+                x: ball.originalX,
+                y: ball.originalY,
+                duration: 300,
+                ease: 'Power2'
+            });
+        }
+
+        function updateTopBalls(stack) {
+            if (stack.length > 0) {
+                stack.forEach(ball => ball.disableInteractive());
+                let topBall = stack[stack.length - 1];
+                topBall.setInteractive();
+                gameScene.input.setDraggable(topBall);
+            }
+        }
+
+        function repositionBalls(tube) {
+            let stack = ballStacks.get(tube);
+            if (!stack) return;
+            stack.forEach((ball, index) => {
+                let targetY = tube.y + 60 - (index * 65);
+                gameScene.tweens.add({
+                    targets: ball,
+                    x: tube.x,
+                    y: targetY,
+                    scaleX: 0.6,
+                    scaleY: 0.6,
+                    duration: 200,
+                    ease: 'Power2'
+                });
+                ball.originalX = tube.x;
+                ball.originalY = targetY;
+            });
+        }
+
+        function checkWinCondition() {
+            let allTubes = [topTube, ...tubes];
+            let allSorted = allTubes.every(tube => {
+                let stack = ballStacks.get(tube);
+                return stack.length === 0 || (stack.length === 3 && stack.every(ball => ball.texture.key === stack[0].texture.key));
+            });
+
+            if (allSorted) {
+                instructionText.setText('You Won!');
+                gameScene.time.delayedCall(800, restartGame);
+            }
+        }
+
+        function restartGame() {
+            ballStacks.forEach((stack, tube) => {
+                stack.forEach(ball => ball.destroy());
+                ballStacks.set(tube, []);
+            });
+            instructionText.setText('Drag to Sort!');
+            spawnBalls();
+        }
+
+        function stopGame() {
+    instructionText.setText("Time's up!");
+
+    let playNowImage = gameScene.add.image(180, 320, 'playnow').setOrigin(0.5);
+    playNowImage.setScale(360 / playNowImage.width, 640 / playNowImage.height);
+    playNowImage.setInteractive({ useHandCursor: true });
+
+    let closeImage = gameScene.add.image(340, 20, 'close').setOrigin(0.5);
+    closeImage.setScale(0.1);
+    closeImage.setInteractive({ useHandCursor: true });
+
+    playNowImage.on('pointerdown', () => {
+        window.open("https://play.google.com/store/games?device=windows", "_blank");
+    });
+
+    closeImage.on('pointerdown', () => {
+        window.close(); // Closes the game tab/window
+    });
+}
+         
+    </script>
+</body>
+</html>
